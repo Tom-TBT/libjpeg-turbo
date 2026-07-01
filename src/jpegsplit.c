@@ -233,6 +233,7 @@ main(int argc, char **argv)
   char basename_buf[256];
   jpeg_component_info *ci;
   jpeg_transform_info *xforms;   /* per-worker xform (workspace pointer) */
+  struct cdjpeg_progress_mgr src_progress;
 
   progname = argv[0];
   if (progname == NULL || progname[0] == '\0')
@@ -503,7 +504,10 @@ main(int argc, char **argv)
    * After this call the source file is fully consumed and can be closed.
    */
   fprintf(stderr, "%s: decoding %s ...\n", progname, infilename);
+  start_progress_monitor((j_common_ptr)&srcinfo, &src_progress);
+  src_progress.report = TRUE;
   src_coef_arrays = jpeg_read_coefficients(&srcinfo);
+  end_progress_monitor((j_common_ptr)&srcinfo);
   fclose(fp);  /* source fully in virtual arrays; file no longer needed */
 
   /* ---- Process all tiles, in parallel when safe ---- */
