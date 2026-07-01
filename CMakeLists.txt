@@ -759,6 +759,10 @@ if(WITH_TURBOJPEG OR WITH_TOOLS OR WITH_TESTS)
   endif()
 endif()
 
+if(WITH_TOOLS)
+  find_package(OpenMP)
+endif()
+
 if(ENABLE_SHARED)
   add_subdirectory(sharedlib)
 endif()
@@ -923,6 +927,15 @@ if(ENABLE_STATIC)
       src/transupp.c)
     target_link_libraries(jpegtran-static jpeg-static)
     set_property(TARGET jpegtran-static PROPERTY COMPILE_FLAGS
+      "${USE_SETMODE}")
+
+    add_executable(jpegsplit-static src/jpegsplit.c src/cdjpeg.c
+      src/rdswitch.c src/transupp.c)
+    target_link_libraries(jpegsplit-static jpeg-static)
+    if(OpenMP_C_FOUND)
+      target_link_libraries(jpegsplit-static OpenMP::OpenMP_C)
+    endif()
+    set_property(TARGET jpegsplit-static PROPERTY COMPILE_FLAGS
       "${USE_SETMODE}")
   endif()
 
@@ -2004,6 +2017,9 @@ if(ENABLE_STATIC)
       install(PROGRAMS ${DIR}/jpegtran-static${EXE}
         DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin
         RENAME jpegtran${EXE})
+      install(PROGRAMS ${DIR}/jpegsplit-static${EXE}
+        DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin
+        RENAME jpegsplit${EXE})
     endif()
   endif()
 endif()

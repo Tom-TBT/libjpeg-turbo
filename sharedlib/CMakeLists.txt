@@ -129,6 +129,14 @@ if(WITH_TOOLS)
     ../src/transupp.c)
   target_link_libraries(jpegtran jpeg)
   set_property(TARGET jpegtran PROPERTY COMPILE_FLAGS "${USE_SETMODE}")
+
+  add_executable(jpegsplit ../src/jpegsplit.c ../src/cdjpeg.c
+    ../src/rdswitch.c ../src/transupp.c)
+  target_link_libraries(jpegsplit jpeg)
+  if(OpenMP_C_FOUND)
+    target_link_libraries(jpegsplit OpenMP::OpenMP_C)
+  endif()
+  set_property(TARGET jpegsplit PROPERTY COMPILE_FLAGS "${USE_SETMODE}")
 endif()
 
 if(WITH_TESTS)
@@ -170,7 +178,7 @@ install(TARGETS jpeg EXPORT ${CMAKE_PROJECT_NAME}Targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT lib
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin)
 if(WITH_TOOLS)
-  install(TARGETS cjpeg djpeg jpegtran
+  install(TARGETS cjpeg djpeg jpegtran jpegsplit
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin)
 endif()
 if(MSVC_LIKE AND CMAKE_C_LINKER_SUPPORTS_PDB)
