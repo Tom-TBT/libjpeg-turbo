@@ -98,8 +98,8 @@ usage(void)
   fprintf(stderr,
           "                  (tool adjusts upward to match the iMCU size)\n");
   fprintf(stderr, "  -outdir DIR     Output directory (default: .)\n");
-  fprintf(stderr, "  -copy none      Copy no extra markers from source file\n");
-  fprintf(stderr, "  -copy comments  Copy only comment (COM) markers (default)\n");
+  fprintf(stderr, "  -copy none      Copy no extra markers from source file (default)\n");
+  fprintf(stderr, "  -copy comments  Copy only comment (COM) markers\n");
   fprintf(stderr, "  -copy icc       Copy only ICC profile (APP2) markers\n");
   fprintf(stderr, "  -copy all       Copy all extra markers\n");
   fprintf(stderr,
@@ -186,7 +186,7 @@ encode_tile(j_decompress_ptr srcinfo, jvirt_barray_ptr *src_coef_arrays,
   /* Private EXIF copy for -copy all (see comment above). */
   j_decompress_ptr effective_src = srcinfo;
   struct jpeg_decompress_struct tile_src;
-  jpeg_saved_marker_struct tile_marker;
+  jpeg_saved_marker_ptr tile_marker;
   JOCTET *tile_exif = NULL;
 
   /* When copying all markers, jtransform_adjust_parameters patches the
@@ -276,7 +276,7 @@ main(int argc, char **argv)
   long max_memory = 0;          /* 0 = unlimited */
   boolean optimize_coding = FALSE;
   boolean arith_code = FALSE;
-  JCOPY_OPTION copyoption = JCOPYOPT_COMMENTS;  /* -copy switch */
+  JCOPY_OPTION copyoption = JCOPYOPT_NONE;  /* -copy switch */
   FILE *fp;
   struct jpeg_decompress_struct srcinfo;
   struct jpeg_error_mgr jsrcerr;
