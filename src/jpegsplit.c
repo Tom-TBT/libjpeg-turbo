@@ -186,7 +186,7 @@ encode_tile(j_decompress_ptr srcinfo, jvirt_barray_ptr *src_coef_arrays,
   /* Private EXIF copy for -copy all (see comment above). */
   j_decompress_ptr effective_src = srcinfo;
   struct jpeg_decompress_struct tile_src;
-  jpeg_saved_marker_ptr tile_marker;
+  struct jpeg_marker_struct tile_marker;
   JOCTET *tile_exif = NULL;
 
   /* When copying all markers, jtransform_adjust_parameters patches the
