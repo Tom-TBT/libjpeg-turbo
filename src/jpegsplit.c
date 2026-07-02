@@ -98,6 +98,16 @@ usage(void)
   fprintf(stderr,
           "                  (tool adjusts upward to match the iMCU size)\n");
   fprintf(stderr, "  -outdir DIR     Output directory (default: .)\n");
+  fprintf(stderr, "  -copy none      Copy no extra markers from source file\n");
+  fprintf(stderr, "  -copy comments  Copy only comment (COM) markers (default)\n");
+  fprintf(stderr, "  -copy icc       Copy only ICC profile (APP2) markers\n");
+  fprintf(stderr, "  -copy all       Copy all extra markers\n");
+  fprintf(stderr,
+          "                  EXIF ImageWidth/Height patched per tile;\n");
+  fprintf(stderr,
+          "                  other EXIF tags still reference the full\n");
+  fprintf(stderr,
+          "                  source image (GPS, camera model, etc.)\n");
   fprintf(stderr,
           "  -workers N      Parallel workers (0 = all cores, default: 0)\n");
   fprintf(stderr,
@@ -108,7 +118,7 @@ usage(void)
           "                  Use -workers 1 when spilling to avoid file-seek races.\n");
 #ifdef ENTROPY_OPT_SUPPORTED
   fprintf(stderr,
-          "  -optimize       Optimize Huffman table (smaller file, but slower)\n");
+          "  -optimize       Optimize Huffman table (smaller file, but slower compression)\n");
 #endif
 #ifdef C_ARITH_CODING_SUPPORTED
   fprintf(stderr, "  -arithmetic     Use arithmetic coding\n");
@@ -154,17 +164,60 @@ get_basename(const char *path, char *out, size_t outlen)
  *   (a) each thread has a different xform->workspace_coef_arrays, and
  *   (b) the DCT virtual arrays are fully in RAM (no disk spill).
  *
+ * For -copy all: jtransform_adjust_parameters would normally patch
+ * ExifImageWidth/Height in-place inside srcinfo->marker_list->data, which is
+ * shared across threads.  We avoid the race by giving each tile a shallow
+ * copy of srcinfo whose marker_list points to a private copy of the EXIF
+ * bytes.  Only those bytes are duplicated; everything else (virtual arrays,
+ * memory manager, all other markers) is shared read-only and is safe.
+ *
  * Returns 0 on success, non-zero on failure.
  */
 LOCAL(int)
 encode_tile(j_decompress_ptr srcinfo, jvirt_barray_ptr *src_coef_arrays,
             jpeg_transform_info *xform, const char *outpath,
-            boolean optimize_coding, boolean arith_code)
+            boolean optimize_coding, boolean arith_code,
+            JCOPY_OPTION copyoption)
 {
   struct jpeg_compress_struct dstinfo;
   struct jpeg_error_mgr jdsterr;
   jvirt_barray_ptr *dst_coef_arrays;
   FILE *fp;
+  /* Private EXIF copy for -copy all (see comment above). */
+  j_decompress_ptr effective_src = srcinfo;
+  struct jpeg_decompress_struct tile_src;
+  jpeg_saved_marker_struct tile_marker;
+  JOCTET *tile_exif = NULL;
+
+  /* When copying all markers, jtransform_adjust_parameters patches the
+   * ExifImageWidth/Height TIFF tags inside srcinfo->marker_list->data.
+   * That buffer is shared by all threads.  To avoid a data race without
+   * any serialization overhead, we give this tile a shallow copy of
+   * srcinfo whose first marker node points to a private EXIF data buffer.
+   * All other markers (XMP, IPTC, ...) are only read, so sharing them
+   * is safe.  The expensive DCT copy + Huffman encode still runs fully
+   * in parallel because it uses the original srcinfo's virtual arrays. */
+  if ((copyoption == JCOPYOPT_ALL || copyoption == JCOPYOPT_ALL_EXCEPT_ICC) &&
+      srcinfo->marker_list != NULL &&
+      srcinfo->marker_list->marker == JPEG_APP0 + 1 &&
+      srcinfo->marker_list->data_length >= 6 &&
+      srcinfo->marker_list->data[0] == 0x45 &&  /* 'E' */
+      srcinfo->marker_list->data[1] == 0x78 &&  /* 'x' */
+      srcinfo->marker_list->data[2] == 0x69 &&  /* 'i' */
+      srcinfo->marker_list->data[3] == 0x66 &&  /* 'f' */
+      srcinfo->marker_list->data[4] == 0 &&
+      srcinfo->marker_list->data[5] == 0) {
+    tile_exif = (JOCTET *)malloc(srcinfo->marker_list->data_length);
+    if (tile_exif != NULL) {
+      memcpy(tile_exif, srcinfo->marker_list->data,
+             srcinfo->marker_list->data_length);
+      tile_marker        = *srcinfo->marker_list; /* copy the list node */
+      tile_marker.data   = tile_exif;             /* redirect to private buf */
+      tile_src           = *srcinfo;              /* shallow-copy decompressor */
+      tile_src.marker_list = &tile_marker;        /* override first marker */
+      effective_src      = &tile_src;
+    }
+  }
 
   dstinfo.err = jpeg_std_error(&jdsterr);
   jpeg_create_compress(&dstinfo);
@@ -183,27 +236,28 @@ encode_tile(j_decompress_ptr srcinfo, jvirt_barray_ptr *src_coef_arrays,
 #endif
 
   /* Adjust dstinfo dimensions and get the destination coefficient pointer.
-   * For the tile at (0,0) xform->workspace_coef_arrays is NULL, so this
-   * returns src_coef_arrays directly (the compressor reads only the
-   * top-left tile_w x tile_h portion, which is correct). */
-  dst_coef_arrays = jtransform_adjust_parameters(srcinfo, &dstinfo,
+   * Uses effective_src so the EXIF patch goes into the private buffer. */
+  dst_coef_arrays = jtransform_adjust_parameters(effective_src, &dstinfo,
                                                  src_coef_arrays, xform);
 
   if ((fp = fopen(outpath, WRITE_BINARY)) == NULL) {
     fprintf(stderr, "%s: can't open %s for writing\n", progname, outpath);
     jpeg_destroy_compress(&dstinfo);
+    free(tile_exif);
     return 1;
   }
 
   /* Write the tile (same order as jpegtran) */
   jpeg_stdio_dest(&dstinfo, fp);
   jpeg_write_coefficients(&dstinfo, dst_coef_arrays);
-  jcopy_markers_execute(srcinfo, &dstinfo, JCOPYOPT_NONE);
+  jcopy_markers_execute(effective_src, &dstinfo, copyoption);
+  /* DCT copy + Huffman encode: uses original srcinfo for virtual array access */
   jtransform_execute_transform(srcinfo, &dstinfo, src_coef_arrays, xform);
   jpeg_finish_compress(&dstinfo);
   jpeg_destroy_compress(&dstinfo);
 
   fclose(fp);
+  free(tile_exif);  /* NULL-safe */
 
   return jdsterr.num_warnings ? 1 : 0;
 }
@@ -222,6 +276,7 @@ main(int argc, char **argv)
   long max_memory = 0;          /* 0 = unlimited */
   boolean optimize_coding = FALSE;
   boolean arith_code = FALSE;
+  JCOPY_OPTION copyoption = JCOPYOPT_COMMENTS;  /* -copy switch */
   FILE *fp;
   struct jpeg_decompress_struct srcinfo;
   struct jpeg_error_mgr jsrcerr;
@@ -273,6 +328,21 @@ main(int argc, char **argv)
               "%s: sorry, entropy optimization was not compiled\n", progname);
       exit(EXIT_FAILURE);
 #endif
+
+    } else if (keymatch(arg, "copy", 2)) {
+      /* Select which extra markers to copy to each tile */
+      if (++argn >= argc)
+        usage();
+      if (keymatch(argv[argn], "none", 1))
+        copyoption = JCOPYOPT_NONE;
+      else if (keymatch(argv[argn], "comments", 1))
+        copyoption = JCOPYOPT_COMMENTS;
+      else if (keymatch(argv[argn], "icc", 1))
+        copyoption = JCOPYOPT_ICC;
+      else if (keymatch(argv[argn], "all", 1))
+        copyoption = JCOPYOPT_ALL;
+      else
+        usage();
 
     } else if (keymatch(arg, "outdir", 4)) {
       /* Set output directory */
@@ -361,7 +431,7 @@ main(int argc, char **argv)
     srcinfo.mem->max_memory_to_use = max_memory * 1000L;
 
   jpeg_stdio_src(&srcinfo, fp);
-  jcopy_markers_setup(&srcinfo, JCOPYOPT_NONE);
+  jcopy_markers_setup(&srcinfo, copyoption);
   (void)jpeg_read_header(&srcinfo, TRUE);
 
   img_w = srcinfo.image_width;
@@ -562,7 +632,7 @@ main(int argc, char **argv)
              outdir, basename_buf, row, col);
 
     if (encode_tile(&srcinfo, src_coef_arrays, &cur_xform, outpath,
-                    optimize_coding, arith_code) != 0) {
+                    optimize_coding, arith_code, copyoption) != 0) {
       errors++;
     } else {
       fprintf(stderr, "%s: wrote %s (%ux%u)\n", progname, outpath, w, h);
