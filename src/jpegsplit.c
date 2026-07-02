@@ -110,6 +110,8 @@ usage(void)
           "                  source image (GPS, camera model, etc.)\n");
   fprintf(stderr,
           "  -workers N      Parallel workers (0 = all cores, default: 0)\n");
+  fprintf(stderr, "  -row-start N    First row index in output filenames (default: 0)\n");
+  fprintf(stderr, "  -col-start N    First column index in output filenames (default: 0)\n");
   fprintf(stderr,
           "  -maxmemory N    Max RAM for DCT arrays in kbytes (default: unlimited)\n");
   fprintf(stderr,
@@ -273,6 +275,8 @@ main(int argc, char **argv)
   JDIMENSION tile_w = DEFAULT_TILE_WIDTH;
   JDIMENSION tile_h = DEFAULT_TILE_HEIGHT;
   int n_workers = 0;
+  int row_start = 0;            /* -row-start: first row index in filenames */
+  int col_start = 0;            /* -col-start: first col index in filenames */
   long max_memory = 0;          /* 0 = unlimited */
   boolean optimize_coding = FALSE;
   boolean arith_code = FALSE;
@@ -391,6 +395,24 @@ main(int argc, char **argv)
         usage();
       if (sscanf(argv[argn], "%d", &n_workers) != 1 || n_workers < 0) {
         fprintf(stderr, "%s: bogus -workers argument '%s'\n",
+                progname, argv[argn]);
+        usage();
+      }
+
+    } else if (keymatch(arg, "row-start", 4)) {
+      if (++argn >= argc)
+        usage();
+      if (sscanf(argv[argn], "%d", &row_start) != 1 || row_start < 0) {
+        fprintf(stderr, "%s: bogus -row-start argument '%s'\n",
+                progname, argv[argn]);
+        usage();
+      }
+
+    } else if (keymatch(arg, "col-start", 4)) {
+      if (++argn >= argc)
+        usage();
+      if (sscanf(argv[argn], "%d", &col_start) != 1 || col_start < 0) {
+        fprintf(stderr, "%s: bogus -col-start argument '%s'\n",
                 progname, argv[argn]);
         usage();
       }
@@ -629,7 +651,7 @@ main(int argc, char **argv)
       cur_xform.workspace_coef_arrays = xforms[tid].workspace_coef_arrays;
 
     snprintf(outpath, sizeof(outpath), "%s/%s_%d_%d.jpg",
-             outdir, basename_buf, row, col);
+             outdir, basename_buf, row + row_start, col + col_start);
 
     if (encode_tile(&srcinfo, src_coef_arrays, &cur_xform, outpath,
                     optimize_coding, arith_code, copyoption) != 0) {
