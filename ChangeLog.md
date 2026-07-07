@@ -1,3 +1,23 @@
+3.2.1
+=====
+
+### Significant changes relative to 3.2.0:
+
+1. Fixed a regression introduced by 3.2 beta1[9] that broke Un*x builds in
+which position-independent code (PIC) was not enabled for static libraries.
+This issue could be worked around by explicitly setting the
+`CMAKE_POSITION_INDEPENDENT_CODE` CMake variable or using a toolchain, such as
+the ones provided by Ubuntu, that automatically enables PIC.
+
+2. The RISC-V Vector (RVV) forward DCT modules now use strided segment load
+intrinsics to simultaneously load sample rows from memory and transpose them
+into columns, as well as multiply-accumulate intrinsics where appropriate.
+When using the accurate integer DCT algorithm, RGB-to-baseline JPEG compression
+is approximately 10-17% (avg. 13%) faster (relative to libjpeg-turbo 3.2.0)
+with GCC 14 and 1-8% (avg. 4%) faster with Clang 20.  (Tested on a 1.6 GHz Ky
+X1 CPU.  Actual mileage may vary.)
+
+
 3.2.0
 =====
 
